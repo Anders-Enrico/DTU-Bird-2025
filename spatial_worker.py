@@ -3,7 +3,6 @@ import time
 import math
 import csv
 import os
-
 import an_devices.spatial_device as spatial_device
 from anpp_packets.an_packet_protocol import ANPacket
 from anpp_packets.an_packets import PacketID
@@ -50,7 +49,7 @@ def wait_for_satellites(sat_ready_event, sat_count, shutdown_event):
                         sat_ready_event.set()
         time.sleep(0.1)
 
-def run_spatial(start_event, start_time, interval, max_duration):
+def run_spatial(start_event, start_time, interval, max_duration, shutdown_event):
     comport = "/dev/ttyUSB0"
     baudrate = "460800"
     spatial = spatial_device.Spatial(comport, int(baudrate))
@@ -63,45 +62,47 @@ def run_spatial(start_event, start_time, interval, max_duration):
     folder = os.path.join(base_folder, datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(folder, exist_ok=True)
     csv_path = os.path.join(folder, "spatial_log.csv")
-    csv_file = open(csv_path, "w", newline="")
-    writer = csv.writer(csv_file)
-    writer.writerow(['timestamp', 'latitude', 'longitude', 'height', 'roll', 'pitch', 'satellites'])
+    
+    try:
+        csv_file = open(csv_path, "w", newline="")
+        writer = csv.writer(csv_file)
+        writer.writerow(['timestamp', 'latitude', 'longitude', 'height', 'roll', 'pitch', 'satellites'])
 
-    start_event.wait()
-    base_time = start_time.value
-    print(f"[Spatial] Logging started at: {time.ctime(base_time)}")
+        start_event.wait()
+        base_time = start_time.value
+        print(f"[Spatial] Logging started at: {time.ctime(base_time)}")
 
-    last_log = 0.0
-    while spatial.is_open:
-        now = time.time()
-        if max_duration.value > 0 and now - base_time >= max_duration.value:
-            print("[Spatial] Max duration reached.")
-            break
+        last_log = 0.0
+        while spatial.is_open and not shutdown_event.is_set():
+            now = time.time()
+            if max_duration.value > 0 and now - base_time >= max_duration.value:
+                print("[Spatial] Max duration reached.")
+                break
 
-        if spatial.ser and spatial.ser.is_open and spatial.in_waiting() > 0:
-            data = spatial.read(spatial.in_waiting())
-            spatial.decoder.add_data(packet_bytes=data)
+            if spatial.ser and spatial.ser.is_open and spatial.in_waiting() > 0:
+                data = spatial.read(spatial.in_waiting())
+                spatial.decoder.add_data(packet_bytes=data)
 
-        if len(spatial.decoder.buffer) > 0:
-            pkt = spatial.decoder.decode()
-            if pkt and pkt.id == PacketID.system_state:
-                state = spatial_device.SystemStatePacket()
-                if state.decode(pkt) != 0:
-                    print("[Spatial] Failed to decode system_state packet.")
-                    continue
+            if len(spatial.decoder.buffer) > 0:
+                pkt = spatial.decoder.decode()
+                if pkt and pkt.id == PacketID.system_state:
+                    state = spatial_device.SystemStatePacket()
+                    if state.decode(pkt) != 0:
+                        print("[Spatial] Failed to decode system_state packet.")
+                        continue
 
-                if (now - last_log) >= interval.value:
-                    lat = math.degrees(state.latitude)
-                    lon = math.degrees(state.longitude)
-                    roll = math.degrees(state.orientation[0])
-                    pitch = math.degrees(state.orientation[1])
-                    timestamp = datetime.datetime.now().isoformat()
+                    if (now - last_log) >= interval.value:
+                        lat = math.degrees(state.latitude)
+                        lon = math.degrees(state.longitude)
+                        roll = math.degrees(state.orientation[0])
+                        pitch = math.degrees(state.orientation[1])
+                        timestamp = datetime.datetime.now().isoformat()
 
-                    writer.writerow([timestamp, lat, lon, state.height, roll, pitch, ""])
-                    csv_file.flush()
-                    print(f"[Spatial] {timestamp}: Lat {lat:.6f} Lon {lon:.6f} Height {state.height:.2f} Roll {roll:.2f} Pitch {pitch:.2f}")
-                    last_log = now
-
-    csv_file.close()
-    spatial.close()
-    print(f"[Spatial] Data saved to {csv_path}")
+                        writer.writerow([timestamp, lat, lon, state.height, roll, pitch, ""])
+                        csv_file.flush()
+                        print(f"[Spatial] {timestamp}: Lat {lat:.6f} Lon {lon:.6f} Height {state.height:.2f} Roll {roll:.2f} Pitch {pitch:.2f}")
+                        last_log = now
+    finally:
+        csv_file.close()
+        spatial.close()
+        print(f"[Spatial] Data saved to {csv_path}")
