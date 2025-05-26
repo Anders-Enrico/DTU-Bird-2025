@@ -12,11 +12,11 @@ import serial
 import math as m
 
 # === Config ===
-INTERVAL_SECONDS = 1.0  # sample interval
+INTERVAL_SECONDS = 1.0
 MAX_DURATION_SECONDS = 0
 SHUTDOWN_PIN = 20
 LED_PIN = 21
-USB_REQUIRED = 1  # 1 for LED to fade in/out and 0 to ignore and save to desktop if USB not connected
+USB_REQUIRED = 1
 USB_PATH = "/media/bird/D0E44DDBE44DC506"
 SERIAL_PORT = "/dev/ttyUSB0"
 
@@ -92,11 +92,11 @@ def wait_for_shutdown_button(shutdown_event):
                 time.sleep(0.1)
         time.sleep(0.1)
 
-def launch_workers(start_event, start_time, sample_interval, max_duration):
+def launch_workers(start_event, start_time, sample_interval, max_duration, shutdown_event):
     processes = [
-        Process(target=run_camera, args=(start_event, start_time, sample_interval, max_duration)),
-        Process(target=run_adc, args=(start_event, start_time, sample_interval, max_duration)),
-        Process(target=run_spatial, args=(start_event, start_time, sample_interval, max_duration))
+        Process(target=run_camera, args=(start_event, start_time, sample_interval, max_duration, shutdown_event)),
+        Process(target=run_adc, args=(start_event, start_time, sample_interval, max_duration, shutdown_event)),
+        Process(target=run_spatial, args=(start_event, start_time, sample_interval, max_duration, shutdown_event))
     ]
     for p in processes:
         p.start()
@@ -118,9 +118,7 @@ def main():
         led_process.start()
 
         wait_for_short_press()
-
         check_usb_and_serial()
-
         led_stop_event.set()
         led_process.join()
         GPIO.output(LED_PIN, GPIO.LOW)
@@ -176,15 +174,18 @@ def main():
 
         GPIO.output(LED_PIN, GPIO.HIGH)
 
-        processes = launch_workers(start_event, start_time, sample_interval, max_duration)
+        processes = launch_workers(start_event, start_time, sample_interval, max_duration, shutdown_event)
 
         while not shutdown_event.is_set():
             time.sleep(0.5)
 
         print("[Main] Terminating workers...")
+        shutdown_event.set()
         for p in processes:
-            p.terminate()
-            p.join()
+            p.join(timeout=5)
+            if p.is_alive():
+                p.terminate()
+                p.join()
 
         shutdown_watch.terminate()
         GPIO.output(LED_PIN, GPIO.LOW)
