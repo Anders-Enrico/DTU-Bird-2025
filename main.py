@@ -119,7 +119,6 @@ def main():
 
         wait_for_short_press()
 
-        # ✅ Check for USB and serial AFTER the button is pressed
         check_usb_and_serial()
 
         led_stop_event.set()
