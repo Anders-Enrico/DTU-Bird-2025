@@ -12,11 +12,11 @@ import serial
 import math as m
 
 # === Config ===
-INTERVAL_SECONDS = 1.0 # sample interval
+INTERVAL_SECONDS = 1.0  # sample interval
 MAX_DURATION_SECONDS = 0
 SHUTDOWN_PIN = 20
 LED_PIN = 21
-USB_REQUIRED = 1 # 1 for LED to fade in/out and 0 for ignore and save to desktop if USB not connected
+USB_REQUIRED = 1  # 1 for LED to fade in/out and 0 to ignore and save to desktop if USB not connected
 USB_PATH = "/media/bird/D0E44DDBE44DC506"
 SERIAL_PORT = "/dev/ttyUSB0"
 
@@ -112,14 +112,16 @@ def main():
     GPIO.setup(SHUTDOWN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(LED_PIN, GPIO.OUT)
 
-    check_usb_and_serial()
-
     while True:
         led_stop_event = Event()
         led_process = Process(target=blink_led, args=(1, led_stop_event))
         led_process.start()
 
         wait_for_short_press()
+
+        # ✅ Check for USB and serial AFTER the button is pressed
+        check_usb_and_serial()
+
         led_stop_event.set()
         led_process.join()
         GPIO.output(LED_PIN, GPIO.LOW)
