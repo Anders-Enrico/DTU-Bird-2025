@@ -9,7 +9,7 @@ from camera_worker import run_camera
 from mag_worker import run_adc
 from spatial_worker import run_spatial, wait_for_satellites
 import serial
-import math
+import math as m
 
 # === Config ===
 INTERVAL_SECONDS = 1.0 # sample interval
@@ -37,7 +37,7 @@ def fade_led_forever():
     try:
         while True:
             for i in range(100):
-                pwm.ChangeDutyCycle(50 * (1 + math.sin(i * 0.0628)))
+                pwm.ChangeDutyCycle(50 * (1 + m.sin(i * 0.0628)))
                 time.sleep(0.02)
     except KeyboardInterrupt:
         pass
