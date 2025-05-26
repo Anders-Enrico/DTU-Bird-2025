@@ -8,12 +8,17 @@ import RPi.GPIO as GPIO
 from camera_worker import run_camera
 from mag_worker import run_adc
 from spatial_worker import run_spatial, wait_for_satellites
+import serial
+import math
 
 # === Config ===
-INTERVAL_SECONDS = 1.0
+INTERVAL_SECONDS = 1.0 # sample interval
 MAX_DURATION_SECONDS = 0
 SHUTDOWN_PIN = 20
 LED_PIN = 21
+USB_REQUIRED = 1 # 1 for LED to fade in/out and 0 for ignore and save to desktop if USB not connected
+USB_PATH = "/media/bird/D0E44DDBE44DC506"
+SERIAL_PORT = "/dev/ttyUSB0"
 
 def blink_led(blink_interval, stop_event):
     GPIO.setmode(GPIO.BCM)
@@ -23,6 +28,34 @@ def blink_led(blink_interval, stop_event):
         time.sleep(blink_interval)
         GPIO.output(LED_PIN, GPIO.LOW)
         time.sleep(blink_interval)
+
+def fade_led_forever():
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(LED_PIN, GPIO.OUT)
+    pwm = GPIO.PWM(LED_PIN, 100)
+    pwm.start(0)
+    try:
+        while True:
+            for i in range(100):
+                pwm.ChangeDutyCycle(50 * (1 + math.sin(i * 0.0628)))
+                time.sleep(0.02)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        pwm.stop()
+
+def check_usb_and_serial():
+    usb_ok = os.path.ismount(USB_PATH)
+    serial_ok = os.path.exists(SERIAL_PORT)
+
+    if USB_REQUIRED and (not usb_ok or not serial_ok):
+        print("[Main] USB or serial connection missing. Fading LED indefinitely...")
+        fade_led_forever()
+
+    if not usb_ok:
+        print("[Main] WARNING: USB not mounted. Using Desktop as fallback.")
+    if not serial_ok:
+        print("[Main] WARNING: Serial device not found.")
 
 def wait_for_short_press():
     print("[Main] Waiting for button press to start logging...")
@@ -42,7 +75,17 @@ def wait_for_shutdown_button(shutdown_event):
         if GPIO.input(SHUTDOWN_PIN) == GPIO.LOW:
             start = time.time()
             while GPIO.input(SHUTDOWN_PIN) == GPIO.LOW:
-                if time.time() - start >= 3:
+                held_time = time.time() - start
+                if held_time >= 10:
+                    print("[Main] Reboot requested.")
+                    for _ in range(3):
+                        GPIO.output(LED_PIN, GPIO.HIGH)
+                        time.sleep(0.2)
+                        GPIO.output(LED_PIN, GPIO.LOW)
+                        time.sleep(0.2)
+                    os.system("sudo reboot")
+                    return
+                elif held_time >= 3:
                     print("[Main] Shutdown button held. Exiting...")
                     shutdown_event.set()
                     return
@@ -69,8 +112,9 @@ def main():
     GPIO.setup(SHUTDOWN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(LED_PIN, GPIO.OUT)
 
+    check_usb_and_serial()
+
     while True:
-        # LED blinking before start
         led_stop_event = Event()
         led_process = Process(target=blink_led, args=(1, led_stop_event))
         led_process.start()
@@ -91,7 +135,6 @@ def main():
 
         print("[Main] Monitoring shutdown button (hold 3s)...")
 
-        # Slow blink while waiting for satellites
         sat_led_stop = Event()
         sat_blink_process = Process(target=blink_led, args=(0.25, sat_led_stop))
         sat_blink_process.start()
@@ -103,7 +146,7 @@ def main():
         sat_process = Process(target=wait_for_satellites, args=(sat_ready_event, sat_count, shutdown_event))
         sat_process.start()
 
-        timeout = 30  # seconds
+        timeout = 30
         start_time_sat = time.time()
 
         while time.time() - start_time_sat < timeout:
