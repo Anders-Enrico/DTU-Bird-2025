@@ -12,7 +12,7 @@ import serial
 import math as m
 
 # === Config ===
-INTERVAL_SECONDS = 1.0
+INTERVAL_SECONDS = 0.1
 MAX_DURATION_SECONDS = 0
 SHUTDOWN_PIN = 20
 LED_PIN = 21
@@ -47,8 +47,13 @@ def check_usb_and_serial():
     usb_ok = os.path.ismount(USB_PATH)
     serial_ok = os.path.exists(SERIAL_PORT)
 
+    if not usb_ok:
+        print("[Main] ERROR: USB is not mounted.")
+    if not serial_ok:
+        print("[Main] ERROR: Serial port not found.")
+
     if not usb_ok or not serial_ok:
-        print("[Main] USB or serial connection missing. Fading LED indefinitely...")
+        print("[Main] USB or serial connection missing.")
         fade_led_forever()
 
 def wait_for_short_press():
