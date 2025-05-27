@@ -58,7 +58,7 @@ def run_spatial(start_event, start_time, interval, max_duration, shutdown_event)
         print("[Spatial] Not connected.")
         return
 
-    base_folder = "/media/bird/LOGGER/spatial"
+    base_folder = "/media/bird/LOGGER1/spatial"
     folder = os.path.join(base_folder, datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(folder, exist_ok=True)
     csv_path = os.path.join(folder, "spatial_log.csv")
