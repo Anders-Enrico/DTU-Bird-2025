@@ -12,11 +12,10 @@ import serial
 import math as m
 
 # === Config ===
-INTERVAL_SECONDS = 0.1
+INTERVAL_SECONDS = 1.0
 MAX_DURATION_SECONDS = 0
 SHUTDOWN_PIN = 20
 LED_PIN = 21
-USB_REQUIRED = 1 # 1 for fade LED of USB or serial not connected and 0 for save files to desktop if USB not connected
 USB_PATH = "/media/bird/D0E44DDBE44DC506"
 SERIAL_PORT = "/dev/ttyUSB0"
 
@@ -48,14 +47,9 @@ def check_usb_and_serial():
     usb_ok = os.path.ismount(USB_PATH)
     serial_ok = os.path.exists(SERIAL_PORT)
 
-    if USB_REQUIRED and (not usb_ok or not serial_ok):
+    if not usb_ok or not serial_ok:
         print("[Main] USB or serial connection missing. Fading LED indefinitely...")
         fade_led_forever()
-
-    if not usb_ok:
-        print("[Main] WARNING: USB not mounted. Using Desktop as fallback.")
-    if not serial_ok:
-        print("[Main] WARNING: Serial device not found.")
 
 def wait_for_short_press():
     print("[Main] Waiting for button press to start logging...")
