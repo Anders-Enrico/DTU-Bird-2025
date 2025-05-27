@@ -16,7 +16,7 @@ INTERVAL_SECONDS = 0.1
 MAX_DURATION_SECONDS = 0
 SHUTDOWN_PIN = 20
 LED_PIN = 21
-USB_PATH = "/media/bird/LOGGER"
+USB_PATH = "/media/bird/LOGGER1"
 SERIAL_PORT = "/dev/ttyUSB0"
 
 def blink_led(blink_interval, stop_event):
