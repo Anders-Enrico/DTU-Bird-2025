@@ -12,11 +12,11 @@ import serial
 import math as m
 
 # === Config ===
-INTERVAL_SECONDS = 1.0
+INTERVAL_SECONDS = 0.1
 MAX_DURATION_SECONDS = 0
 SHUTDOWN_PIN = 20
 LED_PIN = 21
-USB_REQUIRED = 1
+USB_REQUIRED = 1 # 1 for fade LED of USB or serial not connected and 0 for save files to desktop if USB not connected
 USB_PATH = "/media/bird/D0E44DDBE44DC506"
 SERIAL_PORT = "/dev/ttyUSB0"
 
