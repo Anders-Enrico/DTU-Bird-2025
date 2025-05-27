@@ -6,7 +6,7 @@ import csv
 import cv2
 
 def run_camera(start_event, start_time, interval, max_duration, shutdown_event):
-    base_folder = "/media/bird/D0E44DDBE44DC506/Images"
+    base_folder = "/media/bird/LOGGER/Images"
     session_folder = os.path.join(base_folder, datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(session_folder, exist_ok=True)
     log_path = os.path.join(session_folder, "Cam_data.csv")
