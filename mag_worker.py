@@ -8,7 +8,7 @@ import ads8688
 GPIO.setwarnings(False)
 
 def run_adc(start_event, start_time, interval, max_duration, shutdown_event):
-    base_folder = "/media/bird/LOGGER/mag"
+    base_folder = "/media/bird/LOGGER1/mag"
     folder = os.path.join(base_folder, datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(folder, exist_ok=True)
     filename = os.path.join(folder, "adc_data.csv")
