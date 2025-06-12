@@ -40,9 +40,9 @@ def run_adc(start_event, start_time, interval, max_duration, shutdown_event):
                 # Y on bird is +z (+CH2)
                 adc.manualChannel(2)
                 y = adc.raw2volt(adc.noOp(), ads8688.R0) * 10000
-                # Z on bird is +x (+CH0)
+                # Z on bird is -x (+CH0)
                 adc.manualChannel(0)
-                z = adc.raw2volt(adc.noOp(), ads8688.R0) * 10000
+                z = -adc.raw2volt(adc.noOp(), ads8688.R0) * 10000
 
                 writer.writerow([timestamp, x, y, z])
                 file.flush()
