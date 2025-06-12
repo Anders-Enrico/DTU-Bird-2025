@@ -1,0 +1,184 @@
+import cv2
+import numpy as np
+import math
+import os
+import pandas as pd
+
+image_folder = "/Users/anderspetersen/Desktop/anden_flyvning/undistorted runway images"
+output_dir = "/Users/anderspetersen/Desktop/YawAngles"
+
+# --- Custom crop percentages ---
+top_crop_percent = 2/3
+bottom_crop_percent = 0.0
+left_crop_percent = 0.0
+right_crop_percent = 0.0
+
+# --- Filenames to process ---
+filenames = [
+    "20250529_094945.jpg",
+    "20250529_094947.jpg",
+    "20250529_094948.jpg",
+]
+
+
+
+# --- CREATE OUTPUT FOLDER ---
+os.makedirs(output_dir, exist_ok=True)
+
+# --- RESULTS LIST ---
+results = []
+
+# === PROCESS EACH IMAGE ===
+for filename in filenames:
+    image_path = os.path.join(image_folder, filename)
+    image = cv2.imread(image_path)
+
+    if image is None:
+        print(f"WARNING: Could not load image: {filename}")
+        results.append([filename, np.nan])
+        continue
+
+    # --- BOOST CONTRAST ---
+    image_boost = cv2.normalize(image, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    gamma = 1.5
+    look_up_table = np.array([((i / 255.0) ** (1.0 / gamma)) * 255 for i in np.arange(0, 256)]).astype("uint8")
+    image_boost = cv2.LUT(image_boost, look_up_table)
+
+    # --- Analyze the whole image ---
+    h_full, w_full = image_boost.shape[:2]
+    crop_top = int(h_full * top_crop_percent)
+    crop_bottom = int(h_full * bottom_crop_percent)
+    crop_left = int(w_full * left_crop_percent)
+    crop_right = int(w_full * right_crop_percent)
+    region_img = image_boost[
+        crop_top : h_full - crop_bottom,
+        crop_left : w_full - crop_right
+    ]
+
+
+    # --- Lab color space ---
+    lab = cv2.cvtColor(region_img, cv2.COLOR_BGR2Lab)
+    _, _, b_channel = cv2.split(lab)
+
+    # --- Threshold Mode ---
+
+    threshold_input = b_channel
+
+    # --- Otsu Threshold ---
+    _, otsu_thresh = cv2.threshold(threshold_input, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    # --- Morphology ---
+    kernel = np.ones((5, 5), np.uint8)
+    binary_mask = cv2.morphologyEx(otsu_thresh, cv2.MORPH_OPEN, kernel)
+    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
+
+    # --- Largest Connected Component ---
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
+    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+    filtered_mask = np.zeros_like(binary_mask)
+    filtered_mask[labels == largest_label] = 255
+
+    # --- Hole filling ---
+    inverted = cv2.bitwise_not(filtered_mask)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(inverted, connectivity=8)
+    h, w = inverted.shape
+    enclosed = np.zeros_like(inverted)
+    for i in range(1, num_labels):
+        x, y, bw, bh, _ = stats[i]
+        if x > 0 and y > 0 and x + bw < w and y + bh < h:
+            enclosed[labels == i] = 255
+    filled_mask = cv2.bitwise_or(filtered_mask, enclosed)
+
+    # --- Canny ---
+    edges = cv2.Canny(filled_mask, 50, 150)
+
+    # --- Hough Lines ---
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=40, minLineLength=100, maxLineGap=500)
+
+    # --- Filter valid lines ---
+    valid_lines = []
+    margin = 5
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            if min(y1, y2) < margin or max(y1, y2) > h - margin or min(x1, x2) < margin or max(x1, x2) > w - margin:
+                continue
+            dx = x2 - x1
+            dy = y2 - y1
+            angle_deg = np.degrees(math.atan2(dx, dy))
+            if abs(angle_deg) <= 90:
+                valid_lines.append((x1, y1, x2, y2, angle_deg))
+
+    # --- Split lines into left and right thirds ---
+    left_lines = []
+    right_lines = []
+    mid_x = w // 2
+    for x1, y1, x2, y2, angle in valid_lines:
+        x_center = (x1 + x2) / 2
+        if x_center < mid_x:
+            left_lines.append((x1, y1, x2, y2, angle))
+        else:
+            right_lines.append((x1, y1, x2, y2, angle))
+
+    # --- Find longest line in each half ---
+    def longest_line(lines):
+        max_length = 0
+        best = None
+        for x1, y1, x2, y2, angle in lines:
+            length = np.hypot(x2 - x1, y2 - y1)
+            if length > max_length:
+                max_length = length
+                best = (x1, y1, x2, y2, angle, length)
+        return best
+
+    left_best = longest_line(left_lines)
+    right_best = longest_line(right_lines)
+
+    final_image = image_boost.copy()
+    if left_best and right_best:
+        # Draw both lines
+        left_best = (left_best[0], left_best[1] + crop_top, left_best[2], left_best[3] + crop_top, left_best[4], left_best[5])
+        right_best = (right_best[0], right_best[1] + crop_top, right_best[2], right_best[3] + crop_top, right_best[4], right_best[5])
+
+        cv2.line(final_image, (left_best[0], left_best[1]), (left_best[2], left_best[3]), (0, 255, 0), 6)
+        cv2.line(final_image, (right_best[0], right_best[1]), (right_best[2], right_best[3]), (255, 0, 0), 6)
+
+        left_angle = left_best[4]
+        right_angle = right_best[4]
+        final_angle = (right_angle + left_angle)/2
+
+        # Find midpoints
+        left_mid = np.array([(left_best[0] + left_best[2]) / 2, (left_best[1] + left_best[3]) / 2])
+        right_mid = np.array([(right_best[0] + right_best[2]) / 2, (right_best[1] + right_best[3]) / 2])
+        center = ((left_mid + right_mid) / 2).astype(int)
+
+        # Average angle and length
+        avg_angle = np.deg2rad((left_angle + right_angle) / 2)
+        avg_length = (left_best[5] + right_best[5]) / 2
+
+        # Compute endpoints for the average line
+        dx = (avg_length / 2) * np.sin(avg_angle)
+        dy = (avg_length / 2) * np.cos(avg_angle)
+        pt1 = (int(center[0] - dx), int(center[1] - dy))
+        pt2 = (int(center[0] + dx), int(center[1] + dy))
+
+        cv2.line(final_image, pt1, pt2, (0, 0, 255), 10)
+
+        yaw_angle = final_angle
+        print(f"{filename} --> Left angle: {left_angle:.2f}°, Right angle: {right_angle:.2f}°, Final angle: {yaw_angle:.2f}°")
+    else:
+        yaw_angle = np.nan
+        print(f"{filename} --> Could not find both left and right lines.")
+
+    # --- Save FINAL image ---
+    out_image_path = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}_result.png")
+    cv2.imwrite(out_image_path, final_image)
+
+    # --- Save result to list ---
+    results.append([filename, yaw_angle])
+
+# === SAVE ANGLES CSV ===
+angles_df = pd.DataFrame(results, columns=['filename', 'yaw_angle'])
+angles_csv_path = os.path.join(output_dir, "angles.csv")
+angles_df.to_csv(angles_csv_path, index=False)
+print(f"\nSaved angles CSV: {angles_csv_path}")
