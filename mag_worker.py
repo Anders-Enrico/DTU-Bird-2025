@@ -1,62 +1,49 @@
-from picamera2 import Picamera2
-import time
+import timeAdd commentMore actions
+import csv
 import os
 from datetime import datetime
-import csv
-import cv2
+import RPi.GPIO as GPIO
+import ads8688
 
-# Main camera function
-def run_camera(start_event, start_time, interval, max_duration, shutdown_event):
-    # Create base folder and session subfolder for saving images
-    base_folder = "/media/bird/LOGGER1/Images"
-    session_folder = os.path.join(base_folder, datetime.now().strftime("%Y%m%d_%H%M%S"))
-    os.makedirs(session_folder, exist_ok=True)
-    log_path = os.path.join(session_folder, "Cam_data.csv")
+GPIO.setwarnings(False)
 
-    # Initialize PiCamera2
-    picam = Picamera2()
-    config = picam.create_still_configuration(main={"format": "RGB888"})
-    picam.configure(config)
-    picam.start()
-    print("[Camera] Initialized. Waiting to start...")
+def run_adc(start_event, start_time, interval, max_duration):
+    base_folder = "/media/bird/D0E44DDBE44DC506/mag"
+    folder = os.path.join(base_folder, datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(folder, exist_ok=True)
+    filename = os.path.join(folder, "adc_data.csv")
 
-    try:
-        # Open CSV file for logging
-        with open(log_path, mode="w", newline="") as log_file:
-            writer = csv.writer(log_file)
-            writer.writerow(["timestamp", "filename"])  # Write header row
+    adc = ads8688.ADS8688(bus=0, device=1, cs_pin=8, freq=100000)
+    adc.reset()
+    adc.setGlobalRange(ads8688.R0)
 
-            # Wait until start_event is triggered
-            start_event.wait()
-            base_time = start_time.value
-            print(f"[Camera] Started at: {time.ctime(base_time)}")
+    with open(filename, "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Timestamp", "X", "Y", "Z"])
+        print("[ADC] Initialized. Waiting for start...")
+        start_event.wait()
+        base_time = start_time.value
+        print(f"[ADC] Starting at: {time.ctime(base_time)}")
 
-            last_capture = 0.0
-            while not shutdown_event.is_set():
-                now = time.time()
+        while True:
+            now = time.time()
+            if max_duration.value > 0 and now - base_time >= max_duration.value:
+                print("[ADC] Max duration reached.")
+                break
 
-                # Check if max duration has been reached
-                if max_duration.value > 0 and now - base_time >= max_duration.value:
-                    print("[Camera] Max duration reached.")
-                    break
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            # X on bird is -y(-CH1)
+            adc.manualChannel(1)
+            x = -adc.raw2volt(adc.noOp(), ads8688.R0) * 10000
+            # Y on bird is +z (+CH2)
+            adc.manualChannel(2)
+            y = adc.raw2volt(adc.noOp(), ads8688.R0) * 10000
+            # Z on birdd is -x (+CH0)
+            adc.manualChannel(0)
+            z = -adc.raw2volt(adc.noOp(), ads8688.R0) * 10000
 
-                # Check if it's time to capture next image
-                if (now - last_capture) >= interval.value:
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"{session_folder}/{timestamp}.jpg"
-                    image = picam.capture_array()
+            writer.writerow([timestamp, x, y, z])
+            file.flush()
+            print(f"[ADC] {timestamp}: X={x}, Y={y}, Z={z}")
 
-                    # Save image as JPEG with compression
-                    cv2.imwrite(filename, image, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-
-                    # Log timestamp and filename
-                    writer.writerow([datetime.now().isoformat(), os.path.basename(filename)])
-                    log_file.flush()  # Ensure data is written immediately
-                    print(f"[Camera] Saved and logged: {filename}")
-                    last_capture = now
-
-                time.sleep(0.01)  # Small delay to prevent busy-waiting
-    finally:
-        # Stop camera when done
-        picam.stop()
-        print(f"[Camera] Data saved to {session_folder}")
+            time.sleep(interval.value)
