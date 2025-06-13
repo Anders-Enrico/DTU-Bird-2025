@@ -11,14 +11,15 @@ from spatial_worker import run_spatial, wait_for_satellites
 import serial
 import math as m
 
-# === Config ===
-INTERVAL_SECONDS = 0.1
-MAX_DURATION_SECONDS = 0
-SHUTDOWN_PIN = 20
-LED_PIN = 21
+# === Configuration ===
+INTERVAL_SECONDS = 0.1         # Logging interval in seconds
+MAX_DURATION_SECONDS = 0       # 0 means run until shutdown
+SHUTDOWN_PIN = 20              # GPIO pin for shutdown button
+LED_PIN = 21                   # GPIO pin for status LED
 USB_PATH = "/media/bird/LOGGER1"
 SERIAL_PORT = "/dev/ttyUSB0"
 
+# Blink LED function (used during standby and satellite search)
 def blink_led(blink_interval, stop_event):
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(LED_PIN, GPIO.OUT)
@@ -28,6 +29,7 @@ def blink_led(blink_interval, stop_event):
         GPIO.output(LED_PIN, GPIO.LOW)
         time.sleep(blink_interval)
 
+# LED breathing pattern if system fails to start
 def fade_led_forever():
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(LED_PIN, GPIO.OUT)
@@ -43,6 +45,7 @@ def fade_led_forever():
     finally:
         pwm.stop()
 
+# Check if USB and serial are available before starting
 def check_usb_and_serial():
     usb_ok = os.path.ismount(USB_PATH)
     serial_ok = os.path.exists(SERIAL_PORT)
@@ -54,8 +57,9 @@ def check_usb_and_serial():
 
     if not usb_ok or not serial_ok:
         print("[Main] USB or serial connection missing.")
-        fade_led_forever()
+        fade_led_forever()  # Enter infinite LED error loop
 
+# Wait for short press to start logging
 def wait_for_short_press():
     print("[Main] Waiting for button press to start logging...")
     while True:
@@ -68,6 +72,7 @@ def wait_for_short_press():
                 return
         time.sleep(0.1)
 
+# Monitor shutdown button during logging
 def wait_for_shutdown_button(shutdown_event):
     print("[Main] Monitoring shutdown button (hold 3s)...")
     while not shutdown_event.is_set():
@@ -91,6 +96,7 @@ def wait_for_shutdown_button(shutdown_event):
                 time.sleep(0.1)
         time.sleep(0.1)
 
+# Launch worker processes for camera, ADC, and spatial
 def launch_workers(start_event, start_time, sample_interval, max_duration, shutdown_event):
     processes = [
         Process(target=run_camera, args=(start_event, start_time, sample_interval, max_duration, shutdown_event)),
@@ -99,40 +105,46 @@ def launch_workers(start_event, start_time, sample_interval, max_duration, shutd
     ]
     for p in processes:
         p.start()
-    time.sleep(2)
+
+    time.sleep(2)  # Small delay before starting timestamp
     start_time.value = time.time()
     start_event.set()
     print(f"[Main] Workers started at {time.ctime(start_time.value)}")
     return processes
 
+# Main control loop
 def main():
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)  # Ignore Ctrl+C
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(SHUTDOWN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(LED_PIN, GPIO.OUT)
 
     while True:
+        # Start LED blinking while waiting for user
         led_stop_event = Event()
         led_process = Process(target=blink_led, args=(1, led_stop_event))
         led_process.start()
 
-        wait_for_short_press()
-        check_usb_and_serial()
+        wait_for_short_press()       # Wait for button press to start logging
+        check_usb_and_serial()       # Check for USB and serial availability
         led_stop_event.set()
         led_process.join()
         GPIO.output(LED_PIN, GPIO.LOW)
 
+        # Prepare shared values and events
         shutdown_event = Event()
         start_event = Event()
         start_time = Value(c_double, 0.0)
         sample_interval = Value(c_double, INTERVAL_SECONDS)
         max_duration = Value(c_double, MAX_DURATION_SECONDS)
 
+        # Start shutdown monitor in background
         shutdown_watch = Process(target=wait_for_shutdown_button, args=(shutdown_event,))
         shutdown_watch.start()
 
         print("[Main] Monitoring shutdown button (hold 3s)...")
 
+        # Start satellite search with faster blinking
         sat_led_stop = Event()
         sat_blink_process = Process(target=blink_led, args=(0.25, sat_led_stop))
         sat_blink_process.start()
@@ -144,6 +156,7 @@ def main():
         sat_process = Process(target=wait_for_satellites, args=(sat_ready_event, sat_count, shutdown_event))
         sat_process.start()
 
+        # Wait max 30s for satellites
         timeout = 30
         start_time_sat = time.time()
 
@@ -156,6 +169,7 @@ def main():
                 break
             time.sleep(0.1)
 
+        # Clean up satellite search processes
         sat_process.terminate()
         sat_process.join()
         sat_led_stop.set()
@@ -171,10 +185,13 @@ def main():
             print("[Main] Ready for next session.")
             continue
 
+        # All ready, turn LED solid ON while logging
         GPIO.output(LED_PIN, GPIO.HIGH)
 
+        # Launch worker processes
         processes = launch_workers(start_event, start_time, sample_interval, max_duration, shutdown_event)
 
+        # Monitor shutdown during logging
         while not shutdown_event.is_set():
             time.sleep(0.5)
 
@@ -191,6 +208,7 @@ def main():
 
         print("[Main] Cooling down before next session...")
 
+        # Wait for button release before allowing new session
         while GPIO.input(SHUTDOWN_PIN) == GPIO.LOW:
             time.sleep(0.1)
 
@@ -199,5 +217,6 @@ def main():
 
         print("[Main] Ready for next session.")
 
+# Start the program
 if __name__ == '__main__':
     main()
